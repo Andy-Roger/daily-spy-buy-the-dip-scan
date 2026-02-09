@@ -1,0 +1,68 @@
+name: SPY Dip Buy Scan
+
+on:
+  schedule:
+    # UTC schedule. Adjust as you like.
+    # 5:15 AM America/Los_Angeles is 13:15 UTC in winter, 12:15 UTC in summer.
+    - cron: "15 13 * * *"
+    - cron: "15 12 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  run-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run SPY dip scan
+        id: scan
+        env:
+          # Optional: override defaults here or via repository variables
+          SPY_CORE_VALUE: "127000"
+          ADD_CAPITAL: "30000"
+          TIER1_ALLOC: "0.10"
+          TIER2_ALLOC: "0.25"
+          TIER3_ALLOC: "0.40"
+          PULLBACK_WITHIN_PCT: "0.005"
+          STABILIZE_DAYS: "3"
+          STABILIZE_RANGE_PCT: "0.02"
+        run: |
+          python spy_dip_buy.py
+
+      - name: Upload report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: spy-dip-report
+          path: report.md
+
+      - name: Create issue if buy tier triggered
+        if: ${{ steps.scan.outputs.tier != '0' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const tier = '${{ steps.scan.outputs.tier }}';
+            const amt = Number('${{ steps.scan.outputs.recommended_amount }}').toFixed(2);
+            const body = fs.readFileSync('report.md', 'utf8');
+            const title = `SPY Dip Buy Signal - Tier ${tier} - $${amt}`;
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body
+            });
